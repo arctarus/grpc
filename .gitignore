@@ -24,6 +24,5 @@ erl_crash.dump
 
 .elixir_ls
 
-.elixir_tools
 
 grpc-*.tar
