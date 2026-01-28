@@ -153,9 +153,7 @@ defmodule GRPC.Client.Connection do
   """
   @spec connect(String.t(), keyword()) :: {:ok, Channel.t()} | {:error, any()}
   def connect(target, opts \\ []) do
-    ref = make_ref()
-
-    case build_initial_state(target, Keyword.merge(opts, ref: ref)) do
+    case build_initial_state(target, opts) do
       {:ok, initial_state} ->
         ch = initial_state.virtual_channel
 
@@ -321,7 +319,7 @@ defmodule GRPC.Client.Connection do
     opts =
       Keyword.validate!(opts,
         cred: nil,
-        ref: nil,
+        name: make_ref(),
         adapter: GRPC.Client.Adapters.Gun,
         adapter_opts: [],
         interceptors: [],
@@ -347,7 +345,7 @@ defmodule GRPC.Client.Connection do
     virtual_channel = %Channel{
       scheme: scheme,
       cred: cred,
-      ref: opts[:ref],
+      ref: opts[:name],
       adapter: adapter,
       interceptors: interceptors,
       codec: norm_opts[:codec],
