@@ -18,7 +18,7 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
     %{state: state}
   end
 
-  describe "handle_call/3 - data" do
+  describe "handle_cast/2 - data" do
     setup do
       part_1 = <<0, 0, 0, 0, 12, 10, 10, 72, 101, 108>>
       part_2 = <<108, 111, 32, 76, 117, 105, 115>>
@@ -31,9 +31,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       data: {part1, _, _}
     } do
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, part1}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, part1}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == part1
     end
 
@@ -44,13 +44,12 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       expected_response_message = {:ok, build(:hello_reply_rpc)}
 
       response =
-        StreamResponseProcess.handle_call(
+        StreamResponseProcess.handle_cast(
           {:consume_response, {:data, full_message}},
-          self(),
           state
         )
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == <<>>
       assert :queue.to_list(new_state.responses) == [expected_response_message]
     end
@@ -60,9 +59,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       expected_response_message = {:ok, build(:hello_reply_rpc)}
 
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, part2}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, part2}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == <<>>
       assert :queue.to_list(new_state.responses) == [expected_response_message]
     end
@@ -73,9 +72,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       expected_response_message = {:ok, build(:hello_reply_rpc)}
 
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, data}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, data}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == extra_data
       assert :queue.to_list(new_state.responses) == [expected_response_message]
     end
@@ -88,9 +87,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       combined = hello_luis <> bye_luis
 
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, combined}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, combined}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == <<>>
 
       assert :queue.to_list(new_state.responses) == [
@@ -109,9 +108,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       combined = hello_luis <> bye_luis <> partial
 
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, combined}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, combined}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == partial
 
       assert :queue.to_list(new_state.responses) == [
@@ -128,9 +127,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       combined = hello_luis <> bye_luis <> hello_luis
 
       response =
-        StreamResponseProcess.handle_call({:consume_response, {:data, combined}}, self(), state)
+        StreamResponseProcess.handle_cast({:consume_response, {:data, combined}}, state)
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert new_state.buffer == <<>>
 
       assert :queue.to_list(new_state.responses) == [
@@ -141,7 +140,7 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
     end
   end
 
-  describe "handle_call/3 - headers/trailers" do
+  describe "handle_cast/2 - headers/trailers" do
     test_with_params(
       "put error in responses when incoming headers has error status",
       %{state: state},
@@ -157,15 +156,14 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
         ]
 
         response =
-          StreamResponseProcess.handle_call(
+          StreamResponseProcess.handle_cast(
             {:consume_response, {type, headers}},
-            self(),
             state
           )
 
         expected_error = {:error, %GRPC.RPCError{message: "Internal Server Error", status: 2}}
 
-        assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+        assert {:noreply, new_state, {:continue, :produce_response}} = response
         assert :queue.to_list(new_state.responses) == [expected_error]
       end,
       do: [
@@ -191,15 +189,14 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
         ]
 
         response =
-          StreamResponseProcess.handle_call(
+          StreamResponseProcess.handle_cast(
             {:consume_response, {type, headers}},
-            self(),
             state
           )
 
         expected_response = {type, Map.new(headers)}
 
-        assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+        assert {:noreply, new_state, {:continue, :produce_response}} = response
         assert :queue.to_list(new_state.responses) == [expected_response]
       end,
       do: [{:headers}, {:trailers}]
@@ -218,13 +215,12 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
         ]
 
         response =
-          StreamResponseProcess.handle_call(
+          StreamResponseProcess.handle_cast(
             {:consume_response, {type, headers}},
-            self(),
             state
           )
 
-        assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+        assert {:noreply, new_state, {:continue, :produce_response}} = response
         assert :queue.is_empty(new_state.responses)
       end,
       do: [{:headers}, {:trailers}]
@@ -243,13 +239,12 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       ]
 
       response =
-        StreamResponseProcess.handle_call(
+        StreamResponseProcess.handle_cast(
           {:consume_response, {:headers, headers}},
-          self(),
           state
         )
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert GRPC.Compressor.Gzip == new_state.compressor
     end
 
@@ -266,43 +261,40 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       ]
 
       response =
-        StreamResponseProcess.handle_call(
+        StreamResponseProcess.handle_cast(
           {:consume_response, {:headers, headers}},
-          self(),
           state
         )
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert nil == new_state.compressor
     end
   end
 
-  describe "handle_call/3 - errors" do
+  describe "handle_cast/2 - errors" do
     test "add error tuple to responses", %{state: state} do
       error = {:error, "howdy"}
 
       response =
-        StreamResponseProcess.handle_call(
+        StreamResponseProcess.handle_cast(
           {:consume_response, error},
-          self(),
           state
         )
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert :queue.to_list(new_state.responses) == [error]
     end
   end
 
-  describe "handle_call/3 - done" do
+  describe "handle_cast/2 - done" do
     test "set state to done", %{state: state} do
       response =
-        StreamResponseProcess.handle_call(
+        StreamResponseProcess.handle_cast(
           {:consume_response, :done},
-          self(),
           state
         )
 
-      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert {:noreply, new_state, {:continue, :produce_response}} = response
       assert true == new_state.done
     end
   end
@@ -338,6 +330,40 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       assert is_nil(from)
       assert :queue.to_list(responses) == [2]
       assert_receive {:tag, 1}
+    end
+  end
+
+  describe "consume/3 - async behaviour" do
+    setup do
+      {:ok, pid} = StreamResponseProcess.start_link(build(:client_stream), false)
+      %{pid: pid}
+    end
+
+    test "consume/3 does not block the calling process", %{pid: pid} do
+      # GenServer.cast always returns :ok immediately, without a round-trip to
+      # the target process.
+      result = StreamResponseProcess.consume(pid, :error, "some error")
+      assert result == :ok
+    end
+
+    test "done/1 does not block the calling process", %{pid: pid} do
+      result = StreamResponseProcess.done(pid)
+      assert result == :ok
+    end
+
+    test "done/1 after consume/3 is always processed last (FIFO mailbox ordering)", %{pid: pid} do
+      data = <<0, 0, 0, 0, 12, 10, 10, 72, 101, 108, 108, 111, 32, 76, 117, 105, 115>>
+
+      # Fire both casts without blocking; the process mailbox guarantees FIFO.
+      :ok = StreamResponseProcess.consume(pid, :data, data)
+      :ok = StreamResponseProcess.done(pid)
+
+      # :sys.get_state/1 is processed as a system message, which is delivered
+      # after all previously queued cast messages. This acts as a synchronisation
+      # barrier, guaranteeing both casts above have been handled before we inspect.
+      state = :sys.get_state(pid)
+      assert state.done == true
+      assert :queue.to_list(state.responses) == [{:ok, build(:hello_reply_rpc)}]
     end
   end
 

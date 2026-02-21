@@ -5,6 +5,20 @@ defmodule GRPC.Client.Adapters.Mint.ConnectionProcess do
   #  It's also responsible for managing requests, which also includes checks for the
   #  connection/request window size, splitting a given payload into appropriate sized chunks
   #  and streaming those to the server using an internal queue.
+  #
+  #  ## Communication model
+  #
+  #  For each active gRPC stream, a dedicated `StreamResponseProcess` is spawned to
+  #  buffer and decode incoming response data. `ConnectionProcess` forwards response
+  #  chunks to those processes via asynchronous `GenServer.cast` calls (through
+  #  `StreamResponseProcess.consume/3` and `StreamResponseProcess.done/1`).
+  #
+  #  This fire-and-forget model ensures that a slow consumer on one stream cannot
+  #  stall data delivery for any other concurrent stream sharing the same connection.
+  #  Message ordering is still guaranteed because the Erlang VM delivers messages
+  #  from a single sender to a single receiver in FIFO order, so a `done/1` cast
+  #  will always be processed after all preceding `consume/3` casts from the same
+  #  caller.
 
   use GenServer
 
@@ -232,36 +246,32 @@ defmodule GRPC.Client.Adapters.Mint.ConnectionProcess do
     if State.empty_headers?(state, request_ref) do
       new_state = State.update_response_headers(state, request_ref, headers)
 
-      :ok =
-        new_state
-        |> State.stream_response_pid(request_ref)
-        |> StreamResponseProcess.consume(:headers, headers)
+      new_state
+      |> State.stream_response_pid(request_ref)
+      |> StreamResponseProcess.consume(:headers, headers)
 
       new_state
     else
-      :ok =
-        state
-        |> State.stream_response_pid(request_ref)
-        |> StreamResponseProcess.consume(:trailers, headers)
+      state
+      |> State.stream_response_pid(request_ref)
+      |> StreamResponseProcess.consume(:trailers, headers)
 
       state
     end
   end
 
   defp process_response({:data, request_ref, new_data}, state) do
-    :ok =
-      state
-      |> State.stream_response_pid(request_ref)
-      |> StreamResponseProcess.consume(:data, new_data)
+    state
+    |> State.stream_response_pid(request_ref)
+    |> StreamResponseProcess.consume(:data, new_data)
 
     state
   end
 
   defp process_response({:done, request_ref}, state) do
-    :ok =
-      state
-      |> State.stream_response_pid(request_ref)
-      |> StreamResponseProcess.done()
+    state
+    |> State.stream_response_pid(request_ref)
+    |> StreamResponseProcess.done()
 
     {_ref, new_state} = State.pop_ref(state, request_ref)
     new_state
@@ -392,8 +402,8 @@ defmodule GRPC.Client.Adapters.Mint.ConnectionProcess do
   end
 
   defp send_connection_close_and_end_stream_response(pid) do
-    :ok = StreamResponseProcess.consume(pid, :error, @connection_closed_error)
-    :ok = StreamResponseProcess.done(pid)
+    StreamResponseProcess.consume(pid, :error, @connection_closed_error)
+    StreamResponseProcess.done(pid)
   end
 
   defp check_connection_status(state) do

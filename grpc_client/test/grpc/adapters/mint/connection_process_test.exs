@@ -417,6 +417,56 @@ defmodule GRPC.Client.Adapters.Mint.ConnectionProcessTest do
     end
   end
 
+  describe "concurrent StreamResponseProcess instances receive casts independently" do
+    setup :valid_connection
+
+    test "two StreamResponseProcess instances each receive their data without blocking each other",
+         %{process_pid: conn_pid} do
+      stream = build(:client_stream)
+
+      # Start two independent StreamResponseProcess instances, one per stream.
+      {:ok, resp_pid_1} = StreamResponseProcess.start_link(stream, false)
+      {:ok, resp_pid_2} = StreamResponseProcess.start_link(stream, false)
+
+      # Register both as active requests on the shared connection so that
+      # each pid is reachable through the connection state.
+      version = Application.spec(:grpc_client) |> Keyword.get(:vsn)
+
+      headers = [
+        {"content-type", "application/grpc"},
+        {"user-agent", "grpc-elixir/#{version}"},
+        {"te", "trailers"}
+      ]
+
+      {:ok, _} =
+        ConnectionProcess.request(conn_pid, "POST", "/routeguide.RouteGuide/RecordRoute", headers, :stream,
+          stream_response_pid: resp_pid_1
+        )
+
+      {:ok, _} =
+        ConnectionProcess.request(conn_pid, "POST", "/routeguide.RouteGuide/RecordRoute", headers, :stream,
+          stream_response_pid: resp_pid_2
+        )
+
+      hello_luis = <<0, 0, 0, 0, 12, 10, 10, 72, 101, 108, 108, 111, 32, 76, 117, 105, 115>>
+      bye_luis = <<0, 0, 0, 0, 10, 10, 8, 66, 121, 101, 32, 76, 117, 105, 115>>
+
+      # Cast data to each process directly. With GenServer.cast both calls
+      # return immediately — neither blocks waiting for the other to decode.
+      StreamResponseProcess.consume(resp_pid_1, :data, hello_luis)
+      StreamResponseProcess.consume(resp_pid_2, :data, bye_luis)
+
+      # :sys.get_state/1 is a synchronisation barrier: it is enqueued after the
+      # casts above, so by the time it returns both processes have already
+      # handled their respective messages.
+      state_1 = :sys.get_state(resp_pid_1)
+      state_2 = :sys.get_state(resp_pid_2)
+
+      assert :queue.to_list(state_1.responses) == [{:ok, build(:hello_reply_rpc)}]
+      assert :queue.to_list(state_2.responses) == [{:ok, build(:bye_reply_rpc)}]
+    end
+  end
+
   defp valid_connection(%{port: port}) do
     {:ok, pid} = ConnectionProcess.start_link(:http, "localhost", port, protocols: [:http2])
     state = :sys.get_state(pid)

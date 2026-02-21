@@ -15,8 +15,9 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
   # consumers from blocking on `:get_response` when the data is already
   # available inside the process.
   #
-  # TODO: Refactor the GenServer.call/3 occurrences on this module to produce
-  # telemetry events and log entries in case of failures
+  # Note: the only remaining `GenServer.call` in this module is `handle_call(:get_response, ...)`
+  # which is intentionally synchronous — it is the pull side of the consumer/producer pair and
+  # must block the caller until a response is ready.
 
   @typep accepted_types :: :data | :trailers | :headers | :error
   @typep data_types :: binary() | Mint.Types.headers() | Mint.Types.error()
@@ -58,23 +59,31 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
   end
 
   @doc """
-  Cast a message to process to inform that the stream has finished
-    once all messages are produced. This process will automatically
-    be killed.
+  Signals the `StreamResponseProcess` that the stream has finished. This call
+  is asynchronous (fire-and-forget). The process will automatically stop once
+  all buffered responses have been delivered to the consumer.
+
+  Message ordering is preserved: because Erlang process mailboxes are FIFO,
+  all preceding `consume/3` casts are guaranteed to be processed before this
+  `:done` message is handled.
   """
   @spec done(pid()) :: :ok
   def done(pid) do
-    :ok = GenServer.call(pid, {:consume_response, :done})
-    :ok
+    GenServer.cast(pid, {:consume_response, :done})
   end
 
   @doc """
-  Consume an incoming data or trailers/headers
+  Forwards an incoming data chunk, header set, or error to the
+  `StreamResponseProcess` for decoding and queuing.
+
+  This call is asynchronous (fire-and-forget) — it returns `:ok` immediately
+  without waiting for the process to finish decoding the payload. Message
+  ordering is preserved via the Erlang process mailbox guarantee: messages
+  sent from the same caller are delivered in the order they were cast.
   """
   @spec consume(pid(), type :: accepted_types, data :: data_types) :: :ok
   def consume(pid, type, data) when type in @accepted_types do
-    :ok = GenServer.call(pid, {:consume_response, {type, data}})
-    :ok
+    GenServer.cast(pid, {:consume_response, {type, data}})
   end
 
   # Callbacks
@@ -99,7 +108,8 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
     {:noreply, put_in(state[:from], from), {:continue, :produce_response}}
   end
 
-  def handle_call({:consume_response, {:data, data}}, _from, state) do
+  @impl true
+  def handle_cast({:consume_response, {:data, data}}, state) do
     %{
       buffer: buffer,
       grpc_stream: %{response_mod: res_mod, codec: codec},
@@ -116,23 +126,21 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
       drain_buffer(combined, state.compressor, codec, res_mod, responses)
 
     new_state = %{state | buffer: new_buffer, responses: new_responses}
-    {:reply, :ok, new_state, {:continue, :produce_response}}
+    {:noreply, new_state, {:continue, :produce_response}}
   end
 
-  def handle_call(
+  def handle_cast(
         {:consume_response, {type, headers}},
-        _from,
         %{send_headers_or_trailers: true, responses: responses} = state
       )
       when type in @header_types do
     state = update_compressor({type, headers}, state)
     new_responses = :queue.in(get_headers_response(headers, type), responses)
-    {:reply, :ok, %{state | responses: new_responses}, {:continue, :produce_response}}
+    {:noreply, %{state | responses: new_responses}, {:continue, :produce_response}}
   end
 
-  def handle_call(
+  def handle_cast(
         {:consume_response, {type, headers}},
-        _from,
         %{send_headers_or_trailers: false, responses: responses} = state
       )
       when type in @header_types do
@@ -140,25 +148,24 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
 
     case get_headers_response(headers, type) do
       {:error, _rpc_error} = error ->
-        {:reply, :ok, %{state | responses: :queue.in(error, responses)},
+        {:noreply, %{state | responses: :queue.in(error, responses)},
          {:continue, :produce_response}}
 
       _any ->
-        {:reply, :ok, state, {:continue, :produce_response}}
+        {:noreply, state, {:continue, :produce_response}}
     end
   end
 
-  def handle_call(
+  def handle_cast(
         {:consume_response, {:error, _error} = error},
-        _from,
         %{responses: responses} = state
       ) do
-    {:reply, :ok, %{state | responses: :queue.in(error, responses)},
+    {:noreply, %{state | responses: :queue.in(error, responses)},
      {:continue, :produce_response}}
   end
 
-  def handle_call({:consume_response, :done}, _from, state) do
-    {:reply, :ok, %{state | done: true}, {:continue, :produce_response}}
+  def handle_cast({:consume_response, :done}, state) do
+    {:noreply, %{state | done: true}, {:continue, :produce_response}}
   end
 
   @impl true
