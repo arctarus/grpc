@@ -111,8 +111,12 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
     # preventing consumers from blocking when multiple messages arrive in
     # the same HTTP/2 data frame.
     combined = buffer <> data
-    {new_buffer, new_responses} = drain_buffer(combined, state.compressor, codec, res_mod, responses)
-    {:reply, :ok, %{state | buffer: new_buffer, responses: new_responses}, {:continue, :produce_response}}
+
+    {new_buffer, new_responses} =
+      drain_buffer(combined, state.compressor, codec, res_mod, responses)
+
+    {:reply, :ok, %{state | buffer: new_buffer, responses: new_responses},
+     {:continue, :produce_response}}
   end
 
   def handle_call(
@@ -190,7 +194,14 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
       {{_, message}, rest} ->
         # TODO: add code here to handle compressor headers
         response = codec.decode(message, res_mod)
-        drain_buffer(rest, compressor, codec, res_mod, :queue.in({:ok, response}, responses_queue))
+
+        drain_buffer(
+          rest,
+          compressor,
+          codec,
+          res_mod,
+          :queue.in({:ok, response}, responses_queue)
+        )
 
       _ ->
         {buffer, responses_queue}
