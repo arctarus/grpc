@@ -23,6 +23,3 @@ erl_crash.dump
 /log
 
 grpc-*.tar
-
-# language server
-.expert/
