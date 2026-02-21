@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+  * `StreamResponseProcess`: buffer is now fully drained when a single HTTP/2
+    data frame contains multiple gRPC messages, preventing consumers from
+    blocking unnecessarily while decoded data is already available in the
+    process buffer. A new private `drain_buffer/5` recursive helper replaces
+    the previous single-pass `GRPC.Message.get_message/2` call.
+
 ## v1.0.0-rc.1 (2025-12-02)
 
 ### Enhancements
