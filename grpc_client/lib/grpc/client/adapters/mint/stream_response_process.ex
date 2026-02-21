@@ -115,8 +115,8 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
     {new_buffer, new_responses} =
       drain_buffer(combined, state.compressor, codec, res_mod, responses)
 
-    {:reply, :ok, %{state | buffer: new_buffer, responses: new_responses},
-     {:continue, :produce_response}}
+    new_state = %{state | buffer: new_buffer, responses: new_responses}
+    {:reply, :ok, new_state, {:continue, :produce_response}}
   end
 
   def handle_call(
