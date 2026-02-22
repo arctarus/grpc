@@ -271,6 +271,39 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       assert GRPC.Compressor.Gzip == new_state.compressor
     end
 
+    test "compressor is set and headers are enqueued correctly from a single headers event",
+         %{state: state} do
+      # This test proves that both update_compressor and get_headers_response
+      # derive their results from the same single decode pass: the compressor
+      # is resolved correctly AND the enqueued response contains the decoded
+      # headers map — all from one handle_call invocation.
+      state = %{state | send_headers_or_trailers: true}
+
+      headers = [
+        {"content-length", "0"},
+        {"content-type", "application/grpc+proto"},
+        {"grpc-message", ""},
+        {"grpc-status", "0"},
+        {"server", "Cowboy"},
+        {"grpc-encoding", "gzip"}
+      ]
+
+      response =
+        StreamResponseProcess.handle_call(
+          {:consume_response, {:headers, headers}},
+          self(),
+          state
+        )
+
+      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+
+      # Compressor path — update_compressor used the decoded map
+      assert new_state.compressor == GRPC.Compressor.Gzip
+
+      # Response path — get_headers_response used the same decoded map
+      assert :queue.to_list(new_state.responses) == [{:headers, Map.new(headers)}]
+    end
+
     test "don't update compressor when unsupported compressor is returned by the server", %{
       state: state
     } do

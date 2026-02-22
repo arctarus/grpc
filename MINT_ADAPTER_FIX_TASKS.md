@@ -13,9 +13,9 @@
 |---|----------|-------|--------|
 | [1](#issue-1-buffer-not-fully-drained-on-multi-message-frames) | 🔴 Critical | Buffer not fully drained on multi-message frames | ✅ Merged |
 | [3](#issue-3-binary-buffer-concatenation-allocates-a-new-copy-per-chunk) | 🟡 Moderate | Binary buffer concatenation allocates a new copy per chunk | ✅ Done |
-| [4](#issue-4-decode_headers-called-twice-for-the-same-headers) | 🟡 Moderate | `decode_headers` called twice for the same headers | ⬜ Open |
+| [4](#issue-4-decode_headers-called-twice-for-the-same-headers) | 🟡 Moderate | `decode_headers` called twice for the same headers | ✅ Done |
 | [5](#issue-5-ioiodata_length-recomputed-on-every-queue-tick) | 🟡 Moderate | `IO.iodata_length` recomputed on every queue tick | ⬜ Open |
-| [6](#issue-6-processflagtrap_exit-true-mutates-the-calling-process) | 🔵 Minor | `Process.flag(:trap_exit, true)` permanently mutates the calling process — should save and restore | ⬜ Open |
+| [6](#issue-6-processflagtrap_exit-true-mutates-the-calling-process) | 🔵 Minor | `Process.flag(:trap_exit, true)` permanently mutates the calling process — should save and restore | ✅ Done |
 | [7](#issue-7-dead-code-stateappend_response_data3-is-never-called) | 🔵 Minor | Dead code: `State.append_response_data/3` is never called | ✅ Done |
 | [8](#issue-8-multiple-linear-scans-over-the-same-keyword-list) | 🔵 Minor | Multiple linear scans over the same keyword list | ⬜ Open |
 
@@ -155,20 +155,20 @@ redundant work on every `:headers` or `:trailers` event.
 
 ### 4.1 Implementation
 
-- [ ] In the two `handle_cast` (or `handle_call`) clauses that match
+- [x] In the two `handle_cast` (or `handle_call`) clauses that match
   `{type, headers}` when `type in @header_types`:
   - Decode the headers once at the top of the clause:
     `decoded = GRPC.Transport.HTTP2.decode_headers(headers)`
   - Pass `decoded` into both `update_compressor` and `get_headers_response`.
 
-- [ ] Update the signature of `update_compressor/2` to accept pre-decoded
+- [x] Update the signature of `update_compressor/2` to accept pre-decoded
   headers: `update_compressor({type, decoded_headers}, state)` — or introduce
   a new private `update_compressor_decoded/2` to keep the change minimal.
 
-- [ ] Update the signature of `get_headers_response/2` similarly so it receives
+- [x] Update the signature of `get_headers_response/2` similarly so it receives
   the already-decoded map and skips the `decode_headers` call internally.
 
-- [ ] Remove the `GRPC.Transport.HTTP2.decode_headers/1` call from inside both
+- [x] Remove the `GRPC.Transport.HTTP2.decode_headers/1` call from inside both
   `update_compressor/2` and `get_headers_response/2`.
 
 ---
@@ -177,29 +177,28 @@ redundant work on every `:headers` or `:trailers` event.
 
 > Target file: `grpc_client/test/grpc/adapters/mint/stream_response_process_test.exs`
 
-- [ ] **Regression** — run the full `"handle_call/3 - headers/trailers"` describe
+- [x] **Regression** — run the full `"handle_call/3 - headers/trailers"` describe
   block and confirm all tests still pass, especially:
   - `"put error in responses when incoming headers has error status"` (all
     parameter combinations).
   - `"add compressor to state when incoming headers match available compressor"`.
   - `"don't update compressor when unsupported compressor is returned"`.
 
-- [ ] **New test** — `"compressor is set and headers are enqueued using a single
-  decode pass"`: use `ExUnit.CaptureIO` or a spy/mock on
-  `GRPC.Transport.HTTP2.decode_headers/1` (if the project supports it) to
-  assert it is invoked exactly once per header event. Alternatively, assert
-  both the compressor state and the queued response are correct in a single
-  test case to prove the shared decoded value is used by both paths.
+- [x] **New test** — `"compressor is set and headers are enqueued correctly from
+  a single headers event"`: asserts both that the compressor is resolved
+  correctly (`GRPC.Compressor.Gzip`) and that the enqueued response contains
+  the decoded headers map — all from one `handle_call` invocation, proving
+  the shared decoded value is used by both paths.
 
 ---
 
 ### 4.3 Documentation
 
-- [ ] Add an inline comment above the `decoded = ...` binding in each clause
+- [x] Add an inline comment above the `decoded = ...` binding in each clause
   explaining that the result is shared between compressor resolution and
   response construction.
 
-- [ ] Update the `@doc false` (or inline comment) for `update_compressor/2` and
+- [x] Update the `@doc false` (or inline comment) for `update_compressor/2` and
   `get_headers_response/2` to reflect their new signatures.
 
 - [ ] Add a `CHANGELOG.md` entry:
@@ -308,21 +307,21 @@ The fix is to save the previous flag value before setting it and restore it afte
 
 ### 6.1 Implementation
 
-- [ ] In `connect/2`, capture the previous flag value before setting it:
+- [x] In `connect/2`, capture the previous flag value before setting it:
   ```elixir
   previous_flag = Process.flag(:trap_exit, true)
   ```
 
-- [ ] After `ConnectionProcess.start_link/4` returns (but before the `case`
+- [x] After `ConnectionProcess.start_link/4` returns (but before the `case`
   result is processed), restore the flag:
   ```elixir
   Process.flag(:trap_exit, previous_flag)
   ```
 
-- [ ] Retain the existing `catch :exit, reason ->` clause as a safety net for
+- [x] Retain the existing `catch :exit, reason ->` clause as a safety net for
   any unexpected synchronous exits from `start_link`.
 
-- [ ] Confirm the two previously failing tests now pass:
+- [x] Confirm the two previously failing tests now pass:
   - `"connects insecurely (custom options)"`
   - `"accepts config_options for application specific configuration"`
 
@@ -332,7 +331,7 @@ The fix is to save the previous flag value before setting it and restore it afte
 
 > Target file: `grpc_client/test/grpc/adapters/mint_test.exs`
 
-- [ ] **New test** — `"connect/2 does not permanently alter the trap_exit flag
+- [x] **New test** — `"connect/2 does not permanently alter the trap_exit flag
   of the calling process"`:
   1. Ensure the caller starts with `trap_exit: false`:
      `Process.flag(:trap_exit, false)`.
@@ -340,7 +339,7 @@ The fix is to save the previous flag value before setting it and restore it afte
   3. Assert the flag was restored:
      `assert Process.info(self(), :trap_exit) == {:trap_exit, false}`.
 
-- [ ] **Regression** — run the full `MintTest` suite and confirm all tests pass,
+- [x] **Regression** — run the full `MintTest` suite and confirm all tests pass,
   including the error-path test `"connects insecurely (custom options)"` which
   previously crashed the test process with an unhandled EXIT signal.
 
@@ -348,7 +347,7 @@ The fix is to save the previous flag value before setting it and restore it afte
 
 ### 6.3 Documentation
 
-- [ ] Add an inline comment in `connect/2` explaining why the flag is set and
+- [x] Add an inline comment in `connect/2` explaining why the flag is set and
   why it is restored:
   ```elixir
   # trap_exit must be true while start_link is in progress so that any

@@ -125,8 +125,11 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
         %{send_headers_or_trailers: true, responses: responses} = state
       )
       when type in @header_types do
-    state = update_compressor({type, headers}, state)
-    new_responses = :queue.in(get_headers_response(headers, type), responses)
+    # Decode once and share the result between compressor resolution and
+    # response construction to avoid two redundant map builds per event.
+    decoded = GRPC.Transport.HTTP2.decode_headers(headers)
+    state = update_compressor({type, decoded}, state)
+    new_responses = :queue.in(get_headers_response(decoded, type), responses)
     {:reply, :ok, %{state | responses: new_responses}, {:continue, :produce_response}}
   end
 
@@ -136,9 +139,12 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
         %{send_headers_or_trailers: false, responses: responses} = state
       )
       when type in @header_types do
-    state = update_compressor({type, headers}, state)
+    # Decode once and share the result between compressor resolution and
+    # response construction to avoid two redundant map builds per event.
+    decoded = GRPC.Transport.HTTP2.decode_headers(headers)
+    state = update_compressor({type, decoded}, state)
 
-    case get_headers_response(headers, type) do
+    case get_headers_response(decoded, type) do
       {:error, _rpc_error} = error ->
         {:reply, :ok, %{state | responses: :queue.in(error, responses)},
          {:continue, :produce_response}}
@@ -208,29 +214,32 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcess do
     end
   end
 
-  defp get_headers_response(headers, type) do
-    decoded_trailers = GRPC.Transport.HTTP2.decode_headers(headers)
-    status = String.to_integer(decoded_trailers["grpc-status"] || "0")
+  # Accepts a pre-decoded headers map (not the raw keyword list) so that the
+  # caller can share a single decode_headers/1 result across both this function
+  # and update_compressor/2.
+  defp get_headers_response(decoded, type) do
+    status = String.to_integer(decoded["grpc-status"] || "0")
 
     if status == GRPC.Status.ok() do
-      {type, decoded_trailers}
+      {type, decoded}
     else
       rpc_error =
         GRPC.RPCError.from_grpc_status_details_bin(%{
           status: status,
-          message: decoded_trailers["grpc-message"],
-          encoded_details_bin: decoded_trailers["grpc-status-details-bin"]
+          message: decoded["grpc-message"],
+          encoded_details_bin: decoded["grpc-status-details-bin"]
         })
 
       {:error, rpc_error}
     end
   end
 
-  defp update_compressor({:headers, headers}, state) do
-    decoded_trailers = GRPC.Transport.HTTP2.decode_headers(headers)
-
+  # Accepts a pre-decoded headers map (not the raw keyword list) so that the
+  # caller can share a single decode_headers/1 result across both this function
+  # and get_headers_response/2.
+  defp update_compressor({:headers, decoded}, state) do
     compressor =
-      get_compressor(decoded_trailers["grpc-encoding"], state.grpc_stream.accepted_compressors)
+      get_compressor(decoded["grpc-encoding"], state.grpc_stream.accepted_compressors)
 
     %{state | compressor: compressor}
   end
