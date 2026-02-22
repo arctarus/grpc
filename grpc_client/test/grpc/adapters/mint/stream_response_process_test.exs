@@ -37,6 +37,24 @@ defmodule GRPC.Client.Adapters.Mint.StreamResponseProcessTest do
       assert new_state.buffer == part1
     end
 
+    test "buffer holds the concatenation of prior buffer and new data when combined is still incomplete",
+         %{state: state} do
+      # 5-byte gRPC framing prefix: not-compressed flag + 4-byte length (12 bytes payload)
+      prior_buffer = <<0, 0, 0, 0, 12>>
+      # 2 bytes of the 12-byte payload body — combined total is 7 bytes, still short of the
+      # required 17 bytes (5 header + 12 body) needed to form a complete message
+      new_chunk = <<10, 10>>
+
+      state = %{state | buffer: prior_buffer}
+
+      response =
+        StreamResponseProcess.handle_call({:consume_response, {:data, new_chunk}}, self(), state)
+
+      assert {:reply, :ok, new_state, {:continue, :produce_response}} = response
+      assert new_state.buffer == prior_buffer <> new_chunk
+      assert :queue.is_empty(new_state.responses)
+    end
+
     test "decode full message when incoming date is complete", %{
       state: state,
       data: {_, _, full_message}

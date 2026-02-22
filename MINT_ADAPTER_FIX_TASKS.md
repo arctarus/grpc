@@ -12,7 +12,7 @@
 | # | Severity | Issue | Status |
 |---|----------|-------|--------|
 | [1](#issue-1-buffer-not-fully-drained-on-multi-message-frames) | 🔴 Critical | Buffer not fully drained on multi-message frames | ✅ Merged |
-| [3](#issue-3-binary-buffer-concatenation-allocates-a-new-copy-per-chunk) | 🟡 Moderate | Binary buffer concatenation allocates a new copy per chunk | ⬜ Open |
+| [3](#issue-3-binary-buffer-concatenation-allocates-a-new-copy-per-chunk) | 🟡 Moderate | Binary buffer concatenation allocates a new copy per chunk | ✅ Done |
 | [4](#issue-4-decode_headers-called-twice-for-the-same-headers) | 🟡 Moderate | `decode_headers` called twice for the same headers | ⬜ Open |
 | [5](#issue-5-ioiodata_length-recomputed-on-every-queue-tick) | 🟡 Moderate | `IO.iodata_length` recomputed on every queue tick | ⬜ Open |
 | [6](#issue-6-processflagtrap_exit-true-mutates-the-calling-process) | 🔵 Minor | `Process.flag(:trap_exit, true)` permanently mutates the calling process — should save and restore | ⬜ Open |
@@ -83,17 +83,17 @@ argument to `GRPC.Message.get_message` and once when storing the updated buffer.
 
 ### 3.1 Implementation
 
-- [ ] At the very top of `handle_cast({:consume_response, {:data, data}}, ...)` 
+- [x] At the very top of `handle_cast({:consume_response, {:data, data}}, ...)` 
   (after Issue 2 lands) or the equivalent `handle_call`, bind the result once:
   `combined = buffer <> data`.
 
-- [ ] Pass `combined` to `drain_buffer/5` (after Issue 1 lands) or to
+- [x] Pass `combined` to `drain_buffer/5` (after Issue 1 lands) or to
   `GRPC.Message.get_message/2` directly, and use `combined` as the initial
   buffer value in the no-match branch — eliminating the second concatenation.
 
 - [ ] As a follow-up improvement, consider accumulating incoming chunks as an
   iolist in the `buffer` field and calling `IO.iodata_to_binary/1` only at the
-  `get_message` boundary. Gate this behind a separate sub-task:
+  `get_message` boundary. Gate this behind a separate sub-task (deferred):
 
   - [ ] Change `buffer` initial value in `init/1` from `<<>>` to `[]`.
   - [ ] In the data handler, prepend new data: `combined = [buffer | [data]]`
@@ -107,14 +107,15 @@ argument to `GRPC.Message.get_message` and once when storing the updated buffer.
 
 > Target file: `grpc_client/test/grpc/adapters/mint/stream_response_process_test.exs`
 
-- [ ] **Regression** — run the full `"handle_call/3 - data"` describe block and
+- [x] **Regression** — run the full `"handle_call/3 - data"` describe block and
   confirm all existing tests still pass.
 
-- [ ] **New test** — `"partial message: buffer holds the concatenation of prior
-  buffer and new data"`: set `state.buffer` to a non-empty binary, send a
-  data chunk that still does not complete a message, and assert that
-  `new_state.buffer == prior_buffer <> new_chunk` (i.e. data is not lost and
-  no duplication occurs).
+- [x] **New test** — `"buffer holds the concatenation of prior buffer and new
+  data when combined is still incomplete"`: set `state.buffer` to a non-empty
+  binary (a 5-byte gRPC framing prefix), send a 2-byte chunk that still does
+  not complete the message, and assert that
+  `new_state.buffer == prior_buffer <> new_chunk` and responses queue is empty
+  (i.e. data is not lost and no duplication occurs).
 
 - [ ] If the iolist optimisation sub-task is implemented, add a test verifying
   that `state.buffer` starts as `[]`, correctly accumulates partial data, and
@@ -124,7 +125,7 @@ argument to `GRPC.Message.get_message` and once when storing the updated buffer.
 
 ### 3.3 Documentation
 
-- [ ] Add a one-line inline comment next to the `combined = buffer <> data`
+- [x] Add a one-line inline comment next to the `combined = buffer <> data`
   binding explaining that the concatenation is performed once to avoid
   allocating duplicate binaries.
 
