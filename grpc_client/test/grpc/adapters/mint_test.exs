@@ -78,5 +78,20 @@ defmodule GRPC.Client.Adapters.MintTest do
       assert %{initial_window_size: 50_000, max_frame_size: 50_000} =
                Map.get(state.conn, :client_settings)
     end
+
+    test "does not alter the trap_exit flag of the calling process", %{port: port} do
+      channel = build(:channel, adapter: Mint, port: port, host: "localhost")
+
+      # Record the current flag value and ensure we start from false.
+      # Each ExUnit test runs in its own process so this only affects this test.
+      original = Process.flag(:trap_exit, false)
+
+      Mint.connect(channel, [])
+
+      assert Process.info(self(), :trap_exit) == {:trap_exit, false}
+
+      # Restore in case the test process is reused by the test framework.
+      Process.flag(:trap_exit, original)
+    end
   end
 end

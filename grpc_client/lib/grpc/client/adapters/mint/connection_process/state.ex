@@ -48,8 +48,4 @@ defmodule GRPC.Client.Adapters.Mint.ConnectionProcess.State do
   def pop_ref(state, ref) do
     pop_in(state.requests[ref])
   end
-
-  def append_response_data(state, ref, new_data) do
-    update_in(state.requests[ref].response[:data], fn data -> (data || "") <> new_data end)
-  end
 end

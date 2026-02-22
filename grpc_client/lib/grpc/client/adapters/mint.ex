@@ -37,12 +37,20 @@ defmodule GRPC.Client.Adapters.Mint do
 
     opts = connect_opts(channel, opts) |> merge_opts(module_opts)
 
-    Process.flag(:trap_exit, true)
+    # trap_exit must be true while start_link is in progress so that any
+    # asynchronous EXIT from the linked ConnectionProcess does not kill the
+    # caller. We restore the previous value immediately after start_link
+    # returns to avoid permanently altering the caller's exit-trapping state.
+    previous_flag = Process.flag(:trap_exit, true)
 
-    channel
-    |> mint_scheme()
-    |> ConnectionProcess.start_link(host, port, opts)
-    |> case do
+    result =
+      channel
+      |> mint_scheme()
+      |> ConnectionProcess.start_link(host, port, opts)
+
+    Process.flag(:trap_exit, previous_flag)
+
+    case result do
       {:ok, pid} ->
         {:ok, %{channel | adapter_payload: %{conn_pid: pid}}}
 
